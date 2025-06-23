@@ -5,6 +5,8 @@ from PIL import Image, ImageTk
 import matplotlib.pyplot as plt
 import networkx as nx
 from graph import ManaguaGraph  # Asegúrate de que este import sea correcto
+import numpy as np
+import random
 
 # Leer rutas desde el archivo Excel
 df = pd.read_excel(r"c:\Users\landm\OneDrive\Escritorio\DesarrolloProyecto\GraficoRutasManagua\src\Rutas.xlsx")
@@ -112,15 +114,57 @@ class App:
                             rutas_usadas.append(ruta)
                         break
 
-            # Construir el string de la ruta óptima con cambios de ruta
             resultado_ruta = ruta_cambios[0]
             for item in ruta_cambios[1:]:
                 resultado_ruta += f" → {item}"
 
             costo = len(rutas_usadas) * 2.5
+
+            # --- Estimación de tiempo con velocidad y espera aleatoria ---
+            posiciones = {
+                "Mercado Mayoreo": (851, 241),
+                "Mercado Iván Montenegro": (714, 281),
+                "Linda Vista": (88, 117),
+                "Plaza Inter": (309, 158),
+                "UCA": (328, 305),
+                "Subasta": (860, 110),
+                "Metrocentro": (371, 296),
+                "Zumen": (166, 301),
+                "Mercado Oriental": (387, 163),
+                "Mercado Roberto Huembes": (530, 314),
+                "UNAN": (307, 420),
+                "Tierra Prometida": (146, 335),
+                "Mercado Israel": (136, 304),
+                "Gancho de Camino": (408, 166)
+            }
+            metros_por_pixel = 3  # Ajusta según tu escala de mapa
+
+            # Velocidad aleatoria entre 20 y 50 km/h
+            velocidad_promedio_kmh = random.randint(20, 50)
+            velocidad_mps = velocidad_promedio_kmh * 1000 / 3600  # m/s
+
+            # Espera aleatoria entre 2 y 15 minutos
+            tiempo_espera_min = random.randint(2, 15)
+
+            distancia_total_metros = 0
+            for i in range(len(recorrido)-1):
+                p1, p2 = recorrido[i], recorrido[i+1]
+                if p1 in posiciones and p2 in posiciones:
+                    x1, y1 = posiciones[p1]
+                    x2, y2 = posiciones[p2]
+                    distancia_pixeles = np.sqrt((x2-x1)**2 + (y2-y1)**2)
+                    distancia_total_metros += distancia_pixeles * metros_por_pixel
+
+            tiempo_segundos = distancia_total_metros / velocidad_mps if velocidad_mps > 0 else 0
+            minutos = int(tiempo_segundos // 60) + tiempo_espera_min
+            segundos = int(tiempo_segundos % 60)
+            tiempo_estimado = f"{minutos} min {segundos} seg (Velocidad: {velocidad_promedio_kmh} km/h, Espera: {tiempo_espera_min} min)"
+            # --- Fin estimación de tiempo ---
+
             mensaje = f"Ruta óptima encontrada:\n{resultado_ruta}\n"
             mensaje += f"Rutas usadas: {', '.join(rutas_usadas)}\n"
-            mensaje += f"Costo total: {costo} córdobas"
+            mensaje += f"Costo total: {costo} córdobas\n"
+            mensaje += f"Tiempo estimado de viaje: {tiempo_estimado}"
             messagebox.showinfo("Ruta Óptima", mensaje)
             self.mostrar_ruta_en_mapa(recorrido)
         except Exception as e:
@@ -136,22 +180,35 @@ class App:
 
        # Posiciones de las paradas (debes adaptar esto a tus coordenadas reales)
         posiciones = {
-            "Mercado Oriental": (120, 340),
-            "Rotonda Cristo Rey": (200, 310),
-            "UCA": (350, 400),
-            "El Zumen": (250, 500),
-            "Hospital Lenín Fonseca": (400, 520),
-            # ...agrega todas tus paradas aquí
+            "Mercado Mayoreo": (851, 241),
+            "Mercado Iván Montenegro": (714, 281),
+            "Linda Vista": (88, 117),
+            "Plaza Inter": (309, 158),
+            "UCA": (328, 305),
+            "Subasta": (860, 110),
+            "Metrocentro": (371, 296),
+            "Zumen": (166, 301),
+            "Mercado Oriental": (387, 163),
+            "Mercado Roberto Huembes": (530, 314),
+            "UNAN": (307, 420),
+            "Tierra Prometida": (146, 335),
+            "Mercado Israel": (136, 304),
+            "Gancho de Camino": (408, 166)
         }
 
         # Dibuja nodos y líneas
         for i, parada in enumerate(recorrido):
-            color = 'red' if i == 0 or i == len(recorrido)-1 else 'green'
-            ax.plot(*posiciones[parada], 'o', color=color, markersize=12)
-            ax.text(*posiciones[parada], parada, fontsize=9, color='black', ha='center', va='bottom')
-            if i > 0:
-                prev = recorrido[i-1]
-                ax.plot([posiciones[prev][0], posiciones[parada][0]], [posiciones[prev][1], posiciones[parada][1]], color='blue', linewidth=2)
+            if parada in posiciones:
+                color = 'red' if i == 0 or i == len(recorrido)-1 else 'green'
+                ax.plot(*posiciones[parada], 'o', color=color, markersize=12)
+                ax.text(*posiciones[parada], parada, fontsize=9, color='black', ha='center', va='bottom')
+                if i > 0 and recorrido[i-1] in posiciones:
+                    prev = recorrido[i-1]
+                    ax.plot(
+                        [posiciones[prev][0], posiciones[parada][0]],
+                        [posiciones[prev][1], posiciones[parada][1]],
+                        color='blue', linewidth=2
+                    )
 
         plt.tight_layout()
         plt.show()
