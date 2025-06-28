@@ -2,14 +2,22 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 import pandas as pd
 from PIL import Image, ImageTk
-import matplotlib.pyplot as plt
-import networkx as nx
-from graph import ManaguaGraph  # Asegúrate de que este import sea correcto
-import numpy as np
-import random
+import os
+import json
+from viajeGuar import (
+    guardar_destino_personalizado,
+    obtener_destinos_guardados,
+    eliminar_destino_guardado,
+    actualizar_lista_guardados,
+    seleccionar_guardado,
+    mostrar_ventana_viajes
+)
+from graph import ManaguaGraph
+from historial import HistorialDestinos
+from mapaRutas import mostrar_mapa_rutas
 
 # Leer rutas desde el archivo Excel
-df = pd.read_excel(r"c:\Users\landm\OneDrive\Escritorio\DesarrolloProyecto\GraficoRutasManagua\src\Rutas.xlsx")
+df = pd.read_excel(r"c:\Users\landm\OneDrive\Escritorio\DesarrolloProyecto\GraficoRutasManagua\src\excel\Rutas.xlsx")
 rutas_dict = {}
 paradas_set = set()
 for _, row in df.iterrows():
@@ -28,67 +36,245 @@ for ruta, paradas in rutas_dict.items():
     for i in range(len(paradas) - 1):
         managua_graph.add_route(paradas[i], paradas[i+1], 2.5)
 
+HISTORIAL_PATH = os.path.join(os.path.dirname(__file__), "historial_destinos.xlsx")
+
 # Interfaz gráfica
 class App:
     def __init__(self, root):
         self.root = root
         self.root.title("Rutas de Managua")
-        self.root.geometry("1200x750")  # Aumenta el tamaño de la ventana
-
+        self.root.geometry("450x850")
         self.root.configure(bg="#e0f7fa")
+        self.root.minsize(350, 600)
+        self.root.resizable(True, True)
 
-        # Frame principal para organizar mapa y lista de rutas
-        main_frame = tk.Frame(root, bg="#e0f7fa")
-        main_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        # --- Estilo para Combobox redondeado ---
+        style = ttk.Style()
+        style.theme_use('clam')
+        style.configure("RoundedCombobox.TCombobox",
+                        fieldbackground="#ffffff",
+                        background="#ffffff",
+                        bordercolor="#00796b",
+                        lightcolor="#00796b",
+                        darkcolor="#00796b",
+                        borderwidth=10, #
+                        relief="flat",
+                        padding=5) 
 
-        # Frame izquierdo para la lista de rutas
-        left_frame = tk.Frame(main_frame, bg="#e0f7fa")
-        left_frame.pack(side="left", fill="y", padx=(0, 1))  # Espacio horizontal mínimo
+        # PanedWindow vertical para dividir mapa y opciones
+        self.paned = tk.PanedWindow(root, orient=tk.VERTICAL, sashwidth=8, sashrelief="raised", bg="#e0f7fa")
+        self.paned.pack(fill="both", expand=True)
 
-        # Lista de solo nombres de rutas, sin paradas
-        self.rutas_listbox = tk.Listbox(
-            left_frame,
-            font=("Arial", 12),
-            width=20,
-            height=22,
-            bg="#e0f7fa",
-            highlightthickness=0,
-            borderwidth=0,
-            relief="flat"
+        # Frame 1: Mapa (arriba)
+        self.mapa_frame = tk.Frame(self.paned, bg="#222831")
+        self.paned.add(self.mapa_frame, minsize=100)
+
+        # Frame 2: Opciones (abajo)
+        self.opciones_frame = tk.Frame(self.paned, bg="#181616")
+        self.paned.add(self.opciones_frame, minsize=120)
+
+        # --- Opciones dentro del frame 2 ---
+        self.label_origen = tk.Label(self.opciones_frame, text="Seleccione la parada de origen:", bg="#181616", fg="white", font=("Arial", 14))
+        self.label_origen.pack(pady=(10, 2), anchor="w")
+        self.origen_combo = ttk.Combobox(self.opciones_frame, values=paradas_lista, state="readonly", width=30, font=("Arial", 12), style="RoundedCombobox.TCombobox")
+        self.origen_combo.pack(pady=2, padx=10, fill="x") 
+        self.origen_combo.set("🔍 ¿Dónde te encuentras el día de hoy?")
+
+        self.label_destino = tk.Label(self.opciones_frame, text="Seleccione la parada de destino:", bg="#181616", fg="white", font=("Arial", 14))
+        self.label_destino.pack(pady=(10, 2), anchor="w")
+        self.destino_combo = ttk.Combobox(self.opciones_frame, values=paradas_lista, state="readonly", width=30, font=("Arial", 12), style="RoundedCombobox.TCombobox")
+        self.destino_combo.pack(pady=2, padx=10, fill="x")
+        self.destino_combo.set("🔍 ¿Adonde deseas llegar el día de hoy?")
+
+        self.buscar_btn = tk.Button(self.opciones_frame, text="Buscar Ruta Óptima", bg="#00796b", fg="white", font=("Arial", 12), command=self.buscar_ruta)
+        self.buscar_btn.pack(pady= 10, anchor= "center")
+
+        # --- Lupa y mensaje predeterminado ---
+        self.lupa_frame = tk.Frame(self.mapa_frame, bg="#222831")
+        self.lupa_frame.place(relx=0.5, rely=0.5, anchor="center")
+
+        self.lupa_label = tk.Label(self.lupa_frame, text="🔍", font=("Arial", 60), bg="#222831", fg="#cccccc")
+        self.lupa_label.pack()
+        self.lupa_msg = tk.Label(self.lupa_frame, text="Seleccione un destino para ver la ruta", font=("Arial", 16), bg="#222831", fg="#cccccc")
+        self.lupa_msg.pack()
+
+        # Evento para ocultar la lupa cuando se selecciona destino
+        self.destino_combo.bind("<<ComboboxSelected>>", self.ocultar_lupa)
+
+        # Coloca el sash en la posición correcta después de que la ventana se muestre
+        self.root.after(100, self.ajustar_sash)
+
+        # --- Historial de destinos (persistente) ---
+        self.historial = HistorialDestinos(maxlen=5)
+
+        # --- Botón circular con imagen para desplegar panel lateral ---
+        img_path = r"c:\Users\landm\OneDrive\Escritorio\DesarrolloProyecto\GraficoRutasManagua\src\Imagenes\Opciones.png"
+        if not os.path.exists(img_path):
+            print("¡La imagen no existe en la ruta especificada!")
+
+        self.opciones_img = Image.open(img_path).resize((50, 50))
+        self.opciones_img_tk = ImageTk.PhotoImage(self.opciones_img)
+        self.boton_opciones = tk.Button(
+            self.mapa_frame,
+            image=self.opciones_img_tk,
+            bg="#222831",
+            bd=0,
+            activebackground="#222831",
+            command=self.toggle_panel_lateral,
+            highlightthickness=0
         )
-        for ruta in rutas_dict.keys():
-            self.rutas_listbox.insert(tk.END, f"Ruta {ruta}")
-        self.rutas_listbox.pack(pady=0, fill="y", expand=True)
+        self.boton_opciones.pack(pady=8, padx=8, anchor="nw")
 
-        # Frame derecho para el mapa y controles
-        right_frame = tk.Frame(main_frame, bg="#e0f7fa")
-        right_frame.pack(side="left", fill="both", expand=True)
+        # --- Frame lateral oculto ---
+        self.panel_lateral = tk.Frame(self.root, bg="#232326", width=0, height=850)
+        self.panel_lateral.place(x=0, y=0, relheight=1)
 
-        # Cargar y mostrar la imagen del mapa (500x375 * 1.25 = 625x468)
-        try:
-            imagen = Image.open(r"c:\Users\landm\OneDrive\Escritorio\DesarrolloProyecto\GraficoRutasManagua\src\mapa.png")
-            imagen = imagen.resize((625, 468), Image.Resampling.LANCZOS)
-            self.imagen_tk = ImageTk.PhotoImage(imagen)
-            tk.Label(right_frame, image=self.imagen_tk, bg="#e0f7fa").pack(pady=10)
-        except Exception as e:
-            tk.Label(right_frame, text=f"No se pudo cargar el mapa: {e}", bg="#e0f7fa", fg="red").pack(pady=10)
+        # --- Frame para centrar los botones en el panel lateral ---
+        self.botones_panel = tk.Frame(self.panel_lateral, bg="#232326")
+        self.botones_panel.place(relx=0.5, rely=0.5, anchor="center")
 
-        # Controles debajo del mapa (Origen y Destino en la misma fila)
-        controls_frame = tk.Frame(right_frame, bg="#e0f7fa")
-        controls_frame.pack(pady=10)
+        self.panel_abierto = False
 
-        # Origen
-        tk.Label(controls_frame, text="Seleccione la parada de origen:", bg="#e0f7fa").grid(row=0, column=0, padx=5, pady=5, sticky="e")
-        self.origen_combo = ttk.Combobox(controls_frame, values=paradas_lista, state="readonly", width=25)
-        self.origen_combo.grid(row=1, column=0, padx=5, pady=2)
+        # Vincula el evento de clic a toda la ventana
+        self.root.bind("<Button-1>", self.cerrar_panel_si_fuera)
 
-        # Destino
-        tk.Label(controls_frame, text="Seleccione la parada de destino:", bg="#e0f7fa").grid(row=0, column=1, padx=5, pady=5, sticky="w")
-        self.destino_combo = ttk.Combobox(controls_frame, values=paradas_lista, state="readonly", width=25)
-        self.destino_combo.grid(row=1, column=1, padx=5, pady=2)
+        # --- Carga de imágenes para los botones del panel lateral ---
+        img_viajes = Image.open(r"c:\Users\landm\OneDrive\Escritorio\DesarrolloProyecto\GraficoRutasManagua\src\Imagenes\Viaje.jpg").resize((28, 28))
+        self.img_viajes_tk = ImageTk.PhotoImage(img_viajes)
+        img_lista = Image.open(r"c:\Users\landm\OneDrive\Escritorio\DesarrolloProyecto\GraficoRutasManagua\src\Imagenes\Mapaicono.png").resize((28, 28))
+        self.img_lista_tk = ImageTk.PhotoImage(img_lista)
+        img_mapa = Image.open(r"c:\Users\landm\OneDrive\Escritorio\DesarrolloProyecto\GraficoRutasManagua\src\Imagenes\Lista.jpg").resize((28, 28))
+        self.img_mapa_tk = ImageTk.PhotoImage(img_mapa)
 
-        # Botón debajo de ambos combos
-        tk.Button(right_frame, text="Buscar Ruta Óptima", bg="#00796b", fg="white", command=self.buscar_ruta).pack(pady=10)
+        # --- Botones en el panel lateral ---
+        frame_viajes = tk.Frame(self.botones_panel, bg="#232326")
+        frame_viajes.pack(pady=(10, 10), padx=30, anchor="w")
+        tk.Label(frame_viajes, image=self.img_viajes_tk, bg="#232326").pack(side="left")
+        self.btn_viajes_guardados = tk.Button(
+            frame_viajes,
+            text="Viajes Guardados",
+            bg="#00796b",
+            fg="white",
+            font=("Arial", 13, "bold"),
+            bd=0,
+            activebackground="#009688",
+            activeforeground="white",
+            width=16,
+            command=self.abrir_ventana_viajes
+        )
+        self.btn_viajes_guardados.pack(side="left")
+
+        frame_lista = tk.Frame(self.botones_panel, bg="#232326")
+        frame_lista.pack(pady=(10, 10), padx=30, anchor="w")
+        tk.Label(frame_lista, image=self.img_lista_tk, bg="#232326").pack(side="left")
+        self.btn_lista_rutas = tk.Button(
+            frame_lista,
+            text="Lista de Rutas",
+            bg="#00796b",
+            fg="white",
+            font=("Arial", 13, "bold"),
+            bd=0,
+            activebackground="#009688",
+            activeforeground="white",
+            width=16,
+            command=self.abrir_ventana_lista
+        )
+        self.btn_lista_rutas.pack(side="left")
+
+        frame_mapa = tk.Frame(self.botones_panel, bg="#232326")
+        frame_mapa.pack(pady=(10, 10), padx=30, anchor="w")
+        tk.Label(frame_mapa, image=self.img_mapa_tk, bg="#232326").pack(side="left")
+        self.btn_mapa_rutas = tk.Button(
+            frame_mapa,
+            text="Mapa de rutas",
+            bg="#00796b",
+            fg="white",
+            font=("Arial", 13, "bold"),
+            bd=0,
+            activebackground="#009688",
+            activeforeground="white",
+            width=16,
+            command=self.abrir_ventana_mapa
+        )
+        self.btn_mapa_rutas.pack(side="left")
+
+        # Métodos para abrir nuevas ventanas
+    def abrir_ventana_viajes(self):
+        def set_origen_destino(origen, destino):
+            self.origen_combo.set(origen)
+            self.destino_combo.set(destino)
+            self.ocultar_lupa()
+        mostrar_ventana_viajes(self.root, paradas_lista, set_origen_destino)
+
+    def abrir_ventana_lista(self):
+        ventana = tk.Toplevel(self.root)
+        ventana.title("Lista de Rutas")
+        ventana.geometry("500x400")
+        ventana.resizable(True, True)
+
+        frame = tk.Frame(ventana)
+        frame.pack(fill="both", expand=True, padx=10, pady=10)
+
+        tk.Label(frame, text="Ingrese el numero de la ruta:", font=("Arial", 11, "bold")).pack(anchor="w")
+
+        def solo_numeros(char):
+            return char.isdigit() or char == ""
+
+        vcmd = (ventana.register(solo_numeros), "%P")
+        entry_busqueda = tk.Entry(frame, font=("Arial", 11), validate="key", validatecommand=vcmd)
+        entry_busqueda.pack(fill="x", pady=(0, 8))
+
+        scrollbar = tk.Scrollbar(frame)
+        scrollbar.pack(side="right", fill="y")
+
+        lista = tk.Text(frame, font=("Arial", 12), yscrollcommand=scrollbar.set, wrap="word", state="normal")
+        lista.pack(fill="both", expand=True)
+        scrollbar.config(command=lista.yview)
+
+        def obtener_lista_rutas_y_paradas(rutas_dict):
+            """
+            Devuelve una lista de tuplas (ruta, [paradas]) a partir del diccionario de rutas.
+            """
+            return [(ruta, paradas) for ruta, paradas in rutas_dict.items()]
+
+        rutas_y_paradas = obtener_lista_rutas_y_paradas(rutas_dict)
+
+        def mostrar_rutas(filtro=""):
+            lista.config(state="normal")
+            lista.delete("1.0", "end")
+            for ruta, paradas in rutas_y_paradas:
+                if filtro and filtro.strip() not in str(ruta):
+                    continue
+                lista.insert("end", f"Ruta {ruta}:\n")
+                for parada in paradas:
+                    lista.insert("end", f"   - {parada}\n")
+                lista.insert("end", "\n")
+            lista.config(state="disabled")
+
+        # Mostrar todas las rutas al abrir la ventana
+        mostrar_rutas()
+
+        def on_busqueda(event):
+            filtro = entry_busqueda.get().strip()
+            mostrar_rutas(filtro)
+
+        entry_busqueda.bind("<KeyRelease>", on_busqueda)
+
+    def abrir_ventana_mapa(self):
+        mapa_path = r"C:\Users\landm\OneDrive\Escritorio\DesarrolloProyecto\GraficoRutasManagua\src\Imagenes\mapa.png"
+        mostrar_mapa_rutas(self.root, mapa_path)
+
+    def ajustar_sash(self):
+        altura_ventana = 850  # Usa el alto definido en geometry
+        altura_opciones = int(altura_ventana * 0.60) # Valor para editar el tamaño del segundo frame
+        self.paned.sash_place(0, 0, altura_opciones)
+
+    def ocultar_lupa(self, event=None):
+        destino = self.destino_combo.get().strip()
+        if destino and destino != "🔍 Seleccione un destino...":
+            self.lupa_frame.place_forget()
+        else:
+            self.lupa_frame.place(relx=0.5, rely=0.5, anchor="center")
 
     def buscar_ruta(self):
         origen = self.origen_combo.get().strip()
@@ -96,6 +282,10 @@ class App:
         if not origen or not destino:
             messagebox.showerror("Error", "Debe seleccionar ambas paradas.")
             return
+
+        # Guardar destino en historial si es nuevo y válido
+        self.historial.agregar_destino_si_valido(destino, paradas_lista)
+        # Ya no se necesita self.actualizar_historial()
 
         try:
             recorrido, _ = managua_graph.find_optimal_path(origen, destino)
@@ -120,98 +310,39 @@ class App:
 
             costo = len(rutas_usadas) * 2.5
 
-            # --- Estimación de tiempo con velocidad y espera aleatoria ---
-            posiciones = {
-                "Mercado Mayoreo": (851, 241),
-                "Mercado Iván Montenegro": (714, 281),
-                "Linda Vista": (88, 117),
-                "Plaza Inter": (309, 158),
-                "UCA": (328, 305),
-                "Subasta": (860, 110),
-                "Metrocentro": (371, 296),
-                "Zumen": (166, 301),
-                "Mercado Oriental": (387, 163),
-                "Mercado Roberto Huembes": (530, 314),
-                "UNAN": (307, 420),
-                "Tierra Prometida": (146, 335),
-                "Mercado Israel": (136, 304),
-                "Gancho de Camino": (408, 166)
-            }
-            metros_por_pixel = 3  # Ajusta según tu escala de mapa
-
-            # Velocidad aleatoria entre 20 y 50 km/h
-            velocidad_promedio_kmh = random.randint(20, 50)
-            velocidad_mps = velocidad_promedio_kmh * 1000 / 3600  # m/s
-
-            # Espera aleatoria entre 2 y 15 minutos
-            tiempo_espera_min = random.randint(2, 15)
-
-            distancia_total_metros = 0
-            for i in range(len(recorrido)-1):
-                p1, p2 = recorrido[i], recorrido[i+1]
-                if p1 in posiciones and p2 in posiciones:
-                    x1, y1 = posiciones[p1]
-                    x2, y2 = posiciones[p2]
-                    distancia_pixeles = np.sqrt((x2-x1)**2 + (y2-y1)**2)
-                    distancia_total_metros += distancia_pixeles * metros_por_pixel
-
-            tiempo_segundos = distancia_total_metros / velocidad_mps if velocidad_mps > 0 else 0
-            minutos = int(tiempo_segundos // 60) + tiempo_espera_min
-            segundos = int(tiempo_segundos % 60)
-            tiempo_estimado = f"{minutos} min {segundos} seg (Velocidad: {velocidad_promedio_kmh} km/h, Espera: {tiempo_espera_min} min)"
-            # --- Fin estimación de tiempo ---
-
             mensaje = f"Ruta óptima encontrada:\n{resultado_ruta}\n"
             mensaje += f"Rutas usadas: {', '.join(rutas_usadas)}\n"
             mensaje += f"Costo total: {costo} córdobas\n"
-            mensaje += f"Tiempo estimado de viaje: {tiempo_estimado}"
             messagebox.showinfo("Ruta Óptima", mensaje)
-            self.mostrar_ruta_en_mapa(recorrido)
         except Exception as e:
             messagebox.showerror("Sin ruta", f"No se encontró una ruta entre esas paradas.\n{e}")
 
-    def mostrar_ruta_en_mapa(self, recorrido):
-        # Cargar el mapa base
-        mapa_path = r"c:\Users\landm\OneDrive\Escritorio\DesarrolloProyecto\GraficoRutasManagua\src\mapa.png"
-        img = Image.open(mapa_path)
-        fig, ax = plt.subplots(figsize=(8, 6))
-        ax.imshow(img)
-        ax.axis('off')
+    def abrir_ventana_historial(self):
+        def set_destino(destino):
+            self.destino_combo.set(destino)
+            self.ocultar_lupa()
+        self.historial.mostrar_ventana_historial(self.root, set_destino)
 
-       # Posiciones de las paradas (debes adaptar esto a tus coordenadas reales)
-        posiciones = {
-            "Mercado Mayoreo": (851, 241),
-            "Mercado Iván Montenegro": (714, 281),
-            "Linda Vista": (88, 117),
-            "Plaza Inter": (309, 158),
-            "UCA": (328, 305),
-            "Subasta": (860, 110),
-            "Metrocentro": (371, 296),
-            "Zumen": (166, 301),
-            "Mercado Oriental": (387, 163),
-            "Mercado Roberto Huembes": (530, 314),
-            "UNAN": (307, 420),
-            "Tierra Prometida": (146, 335),
-            "Mercado Israel": (136, 304),
-            "Gancho de Camino": (408, 166)
-        }
+    def toggle_panel_lateral(self):
+        if self.panel_abierto:
+            self.panel_lateral.config(width=0)
+            self.panel_lateral.place_forget()
+            self.panel_abierto = False
+        else:
+            self.panel_lateral.config(width=250)
+            self.panel_lateral.place(x=0, y=0, relheight=1)
+            self.panel_abierto = True
 
-        # Dibuja nodos y líneas
-        for i, parada in enumerate(recorrido):
-            if parada in posiciones:
-                color = 'red' if i == 0 or i == len(recorrido)-1 else 'green'
-                ax.plot(*posiciones[parada], 'o', color=color, markersize=12)
-                ax.text(*posiciones[parada], parada, fontsize=9, color='black', ha='center', va='bottom')
-                if i > 0 and recorrido[i-1] in posiciones:
-                    prev = recorrido[i-1]
-                    ax.plot(
-                        [posiciones[prev][0], posiciones[parada][0]],
-                        [posiciones[prev][1], posiciones[parada][1]],
-                        color='blue', linewidth=2
-                    )
-
-        plt.tight_layout()
-        plt.show()
+    def cerrar_panel_si_fuera(self, event):
+        # Solo cerrar si el panel está abierto y el clic fue fuera del panel lateral
+        if self.panel_abierto:
+            x, y = event.x_root, event.y_root
+            panel_x1 = self.panel_lateral.winfo_rootx()
+            panel_y1 = self.panel_lateral.winfo_rooty()
+            panel_x2 = panel_x1 + self.panel_lateral.winfo_width()
+            panel_y2 = panel_y1 + self.panel_lateral.winfo_height()
+            if not (panel_x1 <= x <= panel_x2 and panel_y1 <= y <= panel_y2):
+                self.toggle_panel_lateral()
 
 if __name__ == "__main__":
     root = tk.Tk()
