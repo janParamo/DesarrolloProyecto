@@ -57,9 +57,9 @@ class App:
                         bordercolor="#00796b",
                         lightcolor="#00796b",
                         darkcolor="#00796b",
-                        borderwidth=10, #
+                        borderwidth=10,
                         relief="flat",
-                        padding=5) 
+                        padding=5)
 
         # PanedWindow vertical para dividir mapa y opciones
         self.paned = tk.PanedWindow(root, orient=tk.VERTICAL, sashwidth=8, sashrelief="raised", bg="#e0f7fa")
@@ -87,7 +87,7 @@ class App:
         self.destino_combo.set("🔍 ¿Adonde deseas llegar el día de hoy?")
 
         self.buscar_btn = tk.Button(self.opciones_frame, text="Buscar Ruta Óptima", bg="#00796b", fg="white", font=("Arial", 12), command=self.buscar_ruta)
-        self.buscar_btn.pack(pady= 10, anchor= "center")
+        self.buscar_btn.pack(pady=10, anchor="center")
 
         # --- Lupa y mensaje predeterminado ---
         self.lupa_frame = tk.Frame(self.mapa_frame, bg="#222831")
@@ -98,14 +98,22 @@ class App:
         self.lupa_msg = tk.Label(self.lupa_frame, text="Seleccione un destino para ver la ruta", font=("Arial", 16), bg="#222831", fg="#cccccc")
         self.lupa_msg.pack()
 
-        # Evento para ocultar la lupa cuando se selecciona destino
-        self.destino_combo.bind("<<ComboboxSelected>>", self.ocultar_lupa)
-
-        # Coloca el sash en la posición correcta después de que la ventana se muestre
-        self.root.after(100, self.ajustar_sash)
-
         # --- Historial de destinos (persistente) ---
         self.historial = HistorialDestinos(maxlen=5)
+
+        self.historial_label = tk.Label(self.opciones_frame, text="Recientes", bg="#181616", fg="white", font=("Arial", 11))
+        self.historial_label.pack(pady=(5, 2), padx=7, anchor="w")
+        self.historial_listbox = tk.Listbox(self.opciones_frame, height=6, font=("Arial", 11), bg="#232326", fg="white", selectbackground="#00796b", activestyle="none")
+        self.historial_listbox.pack(pady=(0, 8), padx=10, fill="x")
+        self.historial_listbox.bind("<<ListboxSelect>>", self.seleccionar_destino_historial)
+        self.actualizar_historial()
+
+        # En tu __init__ después de crear el paned y frames:
+        self.root.after(100, self.ajustar_sash)
+        self.paned.bind("<Configure>", self.ajustar_sash)
+
+        # Evento para ocultar la lupa cuando se selecciona destino (solo una vez aquí)
+        self.destino_combo.bind("<<ComboboxSelected>>", self.ocultar_lupa)
 
         # --- Botón circular con imagen para desplegar panel lateral ---
         img_path = r"c:\Users\landm\OneDrive\Escritorio\DesarrolloProyecto\GraficoRutasManagua\src\Imagenes\Opciones.png"
@@ -264,9 +272,10 @@ class App:
         mapa_path = r"C:\Users\landm\OneDrive\Escritorio\DesarrolloProyecto\GraficoRutasManagua\src\Imagenes\mapa.png"
         mostrar_mapa_rutas(self.root, mapa_path)
 
-    def ajustar_sash(self):
-        altura_ventana = 850  # Usa el alto definido en geometry
-        altura_opciones = int(altura_ventana * 0.60) # Valor para editar el tamaño del segundo frame
+    def ajustar_sash(self, event=None):
+        self.paned.update_idletasks()
+        altura_paned = self.paned.winfo_height()
+        altura_opciones = int(altura_paned * 0.57)  # 0.57 para que frame2 sea 43%
         self.paned.sash_place(0, 0, altura_opciones)
 
     def ocultar_lupa(self, event=None):
@@ -282,10 +291,8 @@ class App:
         if not origen or not destino:
             messagebox.showerror("Error", "Debe seleccionar ambas paradas.")
             return
-
-        # Guardar destino en historial si es nuevo y válido
         self.historial.agregar_destino_si_valido(destino, paradas_lista)
-        # Ya no se necesita self.actualizar_historial()
+        self.actualizar_historial()
 
         try:
             recorrido, _ = managua_graph.find_optimal_path(origen, destino)
@@ -343,6 +350,19 @@ class App:
             panel_y2 = panel_y1 + self.panel_lateral.winfo_height()
             if not (panel_x1 <= x <= panel_x2 and panel_y1 <= y <= panel_y2):
                 self.toggle_panel_lateral()
+
+    def seleccionar_destino_historial(self, event):
+        seleccion = self.historial_listbox.curselection()
+        if seleccion:
+            idx = len(self.historial.obtener_historial()) - 1 - seleccion[0]
+            destino = self.historial.obtener_historial()[idx]
+            self.destino_combo.set(destino)
+            self.ocultar_lupa()
+
+    def actualizar_historial(self):
+        self.historial_listbox.delete(0, tk.END)
+        for destino in reversed(self.historial.obtener_historial()):
+            self.historial_listbox.insert(tk.END, destino)
 
 if __name__ == "__main__":
     root = tk.Tk()
