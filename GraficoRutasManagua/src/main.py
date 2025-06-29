@@ -1,5 +1,6 @@
 import tkinter as tk
 from tkinter import messagebox, ttk
+import tkintermapview
 import pandas as pd
 from PIL import Image, ImageTk
 import os
@@ -73,6 +74,56 @@ class App:
         self.opciones_frame = tk.Frame(self.paned, bg="#181616")
         self.paned.add(self.opciones_frame, minsize=120)
 
+        # --- Agregar el mapa al frame 1 usando tkintermapview ---
+        self.map_widget = tkintermapview.TkinterMapView(self.mapa_frame, width=400, height=350, corner_radius=0)
+        self.map_widget.pack(fill="both", expand=True, padx=0, pady=0)
+        self.map_widget.set_position(12.1364, -86.2514)  # Managua, Nicaragua
+        self.map_widget.set_zoom(11)
+
+        # --- Botón circular con imagen para desplegar panel lateral (encima del mapa) ---
+        img_path = r"c:\Users\landm\OneDrive\Escritorio\DesarrolloProyecto\GraficoRutasManagua\src\Imagenes\Opciones.png"
+        if not os.path.exists(img_path):
+            print("¡La imagen no existe en la ruta especificada!")
+
+        self.opciones_img = Image.open(img_path).resize((50, 50))
+        self.opciones_img_tk = ImageTk.PhotoImage(self.opciones_img)
+        # Cambiar el botón de opciones para usar <ButtonRelease-1> en vez de 'command'
+        self.boton_opciones = tk.Button(
+            self.mapa_frame,
+            image=self.opciones_img_tk,
+            bg="#222831",
+            bd=0,
+            activebackground="#222831",
+            highlightthickness=0
+        )
+        self.boton_opciones.place(relx=1.0, x=-8, y=8, anchor="ne")
+        self.boton_opciones.bind("<ButtonRelease-1>", lambda e: self.toggle_panel_lateral())
+
+        # --- Variables para control de marcadores ---
+        self.marcadores = []
+        self.marcadores_visibles = False  # Ahora ocultos por defecto
+
+        # --- Botón para mostrar/ocultar marcadores ---
+        # --- Frame para el borde negro del botón de marcadores ---
+        self.frame_borde_marcador = tk.Frame(self.mapa_frame, bg="black", width=50, height=50)
+        self.frame_borde_marcador.place(relx=1.0, rely=1.0, x=-8, y=-8, anchor="se")
+        self.frame_borde_marcador.pack_propagate(False)
+        self.boton_marcadores = tk.Button(
+            self.frame_borde_marcador,
+            text="📌",
+            bg="white",
+            fg="black",
+            font=("Arial", 24),
+            bd=0,
+            highlightthickness=0,
+            activebackground="white",
+            activeforeground="black",
+            command=self.toggle_marcadores
+        )
+        self.boton_marcadores.pack(fill="both", expand=True, padx=2, pady=2)
+
+        # Los marcadores NO se crean al inicio, solo con el botón
+
         # --- Opciones dentro del frame 2 ---
         self.label_origen = tk.Label(self.opciones_frame, text="Seleccione la parada de origen:", bg="#181616", fg="white", font=("Arial", 14))
         self.label_origen.pack(pady=(10, 2), anchor="w")
@@ -89,16 +140,7 @@ class App:
         self.buscar_btn = tk.Button(self.opciones_frame, text="Buscar Ruta Óptima", bg="#00796b", fg="white", font=("Arial", 12), command=self.buscar_ruta)
         self.buscar_btn.pack(pady=10, anchor="center")
 
-        # --- Lupa y mensaje predeterminado ---
-        self.lupa_frame = tk.Frame(self.mapa_frame, bg="#222831")
-        self.lupa_frame.place(relx=0.5, rely=0.5, anchor="center")
-
-        self.lupa_label = tk.Label(self.lupa_frame, text="🔍", font=("Arial", 60), bg="#222831", fg="#cccccc")
-        self.lupa_label.pack()
-        self.lupa_msg = tk.Label(self.lupa_frame, text="Seleccione un destino para ver la ruta", font=("Arial", 16), bg="#222831", fg="#cccccc")
-        self.lupa_msg.pack()
-
-        # --- Historial de destinos (persistente) ---
+        # --- Historial de destinos ---
         self.historial = HistorialDestinos(maxlen=5)
 
         self.historial_label = tk.Label(self.opciones_frame, text="Recientes", bg="#181616", fg="white", font=("Arial", 11))
@@ -108,30 +150,8 @@ class App:
         self.historial_listbox.bind("<<ListboxSelect>>", self.seleccionar_destino_historial)
         self.actualizar_historial()
 
-        # En tu __init__ después de crear el paned y frames:
         self.root.after(100, self.ajustar_sash)
         self.paned.bind("<Configure>", self.ajustar_sash)
-
-        # Evento para ocultar la lupa cuando se selecciona destino (solo una vez aquí)
-        self.destino_combo.bind("<<ComboboxSelected>>", self.ocultar_lupa)
-
-        # --- Botón circular con imagen para desplegar panel lateral ---
-        img_path = r"c:\Users\landm\OneDrive\Escritorio\DesarrolloProyecto\GraficoRutasManagua\src\Imagenes\Opciones.png"
-        if not os.path.exists(img_path):
-            print("¡La imagen no existe en la ruta especificada!")
-
-        self.opciones_img = Image.open(img_path).resize((50, 50))
-        self.opciones_img_tk = ImageTk.PhotoImage(self.opciones_img)
-        self.boton_opciones = tk.Button(
-            self.mapa_frame,
-            image=self.opciones_img_tk,
-            bg="#222831",
-            bd=0,
-            activebackground="#222831",
-            command=self.toggle_panel_lateral,
-            highlightthickness=0
-        )
-        self.boton_opciones.pack(pady=8, padx=8, anchor="nw")
 
         # --- Frame lateral oculto ---
         self.panel_lateral = tk.Frame(self.root, bg="#232326", width=0, height=850)
@@ -140,6 +160,18 @@ class App:
         # --- Frame para centrar los botones en el panel lateral ---
         self.botones_panel = tk.Frame(self.panel_lateral, bg="#232326")
         self.botones_panel.place(relx=0.5, rely=0.5, anchor="center")
+
+        self.label_extras = tk.Label(self.panel_lateral, text="Extras", bg="#232326", fg="#ffffff", font=("Arial", 12, "bold"))
+        self.label_extras.place(relx=0.02, rely=0.01, anchor="nw")
+
+        panel_height = 850
+        sep_y = int(panel_height * 0.75)
+        self.separador_creditos = ttk.Separator(self.panel_lateral, orient="horizontal")
+        self.separador_creditos.place(relx=0, rely=0, y=sep_y, relwidth=1)
+        self.label_creditos = tk.Label(self.panel_lateral, text="Desarrolladores", bg="#232326", fg="#ffffff", font=("Arial", 11, "bold"))
+        self.label_creditos.place(relx=0.02, rely=0, y=sep_y+10, anchor="nw")
+        self.label_nombres = tk.Label(self.panel_lateral, text="• Jan Paramo\n• Fernanda Gutierrez", bg="#232326", fg="#ffffff", font=("Arial", 10))
+        self.label_nombres.place(relx=0.02, rely=0, y=sep_y+35, anchor="nw")
 
         self.panel_abierto = False
 
@@ -211,7 +243,6 @@ class App:
         def set_origen_destino(origen, destino):
             self.origen_combo.set(origen)
             self.destino_combo.set(destino)
-            self.ocultar_lupa()
         mostrar_ventana_viajes(self.root, paradas_lista, set_origen_destino)
 
     def abrir_ventana_lista(self):
@@ -278,17 +309,10 @@ class App:
         altura_opciones = int(altura_paned * 0.57)  # 0.57 para que frame2 sea 43%
         self.paned.sash_place(0, 0, altura_opciones)
 
-    def ocultar_lupa(self, event=None):
-        destino = self.destino_combo.get().strip()
-        if destino and destino != "🔍 Seleccione un destino...":
-            self.lupa_frame.place_forget()
-        else:
-            self.lupa_frame.place(relx=0.5, rely=0.5, anchor="center")
-
     def buscar_ruta(self):
         origen = self.origen_combo.get().strip()
         destino = self.destino_combo.get().strip()
-        if not origen or not destino:
+        if not origen or not destino or origen not in paradas_lista or destino not in paradas_lista:
             messagebox.showerror("Error", "Debe seleccionar ambas paradas.")
             return
         self.historial.agregar_destino_si_valido(destino, paradas_lista)
@@ -296,38 +320,66 @@ class App:
 
         try:
             recorrido, _ = managua_graph.find_optimal_path(origen, destino)
+            if not recorrido or len(recorrido) < 2:
+                raise Exception("No se encontró una ruta válida.")
             rutas_usadas = []
-            ruta_cambios = []
+            pasos = [recorrido[0]]
             ruta_actual = None
-
             for i in range(len(recorrido)-1):
                 for ruta, paradas in rutas_dict.items():
                     if recorrido[i] in paradas and recorrido[i+1] in paradas:
                         if ruta_actual != ruta:
                             ruta_actual = ruta
-                            ruta_cambios.append(f"Ruta {ruta}")
-                        ruta_cambios.append(recorrido[i+1])
-                        if not rutas_usadas or rutas_usadas[-1] != ruta:
                             rutas_usadas.append(ruta)
+                            pasos.append(f"Ruta {ruta}")
+                        pasos.append(recorrido[i+1])
                         break
-
-            resultado_ruta = ruta_cambios[0]
-            for item in ruta_cambios[1:]:
-                resultado_ruta += f" → {item}"
-
-            costo = len(rutas_usadas) * 2.5
-
-            mensaje = f"Ruta óptima encontrada:\n{resultado_ruta}\n"
-            mensaje += f"Rutas usadas: {', '.join(rutas_usadas)}\n"
-            mensaje += f"Costo total: {costo} córdobas\n"
+            precio = len(rutas_usadas) * 2.5
+            mensaje = (
+                f"Origen: {origen}\n"
+                f"Destino: {destino}\n"
+                f"Ruta: {' → '.join(pasos)}\n"
+                f"Precio: {len(rutas_usadas)} x 2.5 = {precio} córdobas"
+            )
+            # --- Mostrar marcadores del recorrido en el mapa ---
+            # Eliminar marcadores anteriores
+            for marker in self.marcadores:
+                marker.delete()
+            self.marcadores.clear()
+            # Leer el DataFrame para obtener lat/lon de cada parada
+            df = pd.read_excel(r"c:\\Users\\landm\\OneDrive\\Escritorio\\DesarrolloProyecto\\GraficoRutasManagua\\src\\excel\\Rutas.xlsx")
+            paradas_coords = {}
+            for _, row in df.iterrows():
+                parada = str(row["Parada"]).strip()
+                if not pd.isna(row.get("Latitud")) and not pd.isna(row.get("Longitud")):
+                    paradas_coords[parada] = (row["Latitud"], row["Longitud"])
+            # Crear marcadores para cada parada del recorrido
+            for parada in recorrido:
+                if parada in paradas_coords:
+                    lat, lon = paradas_coords[parada]
+                    marker = self.map_widget.set_marker(lat, lon, text=parada)
+                    self.marcadores.append(marker)
+            # --- Dibujar línea del recorrido en el mapa ---
+            if hasattr(self, 'ruta_linea') and self.ruta_linea:
+                self.ruta_linea.delete()
+                for flecha in self.ruta_flechas:
+                    self.map_widget.canvas.delete(flecha)
+            self.ruta_flechas = []
+            coords_ruta = [paradas_coords[parada] for parada in recorrido if parada in paradas_coords]
+            self.ruta_linea = None
+            if len(coords_ruta) >= 2:
+                # Línea base
+                self.ruta_linea = self.map_widget.set_path(coords_ruta, color='#00796b', width=4)
+            self.marcadores_visibles = True
+            self.boton_marcadores.config(text="📌")
             messagebox.showinfo("Ruta Óptima", mensaje)
         except Exception as e:
+            print(f"Error al buscar ruta: {e}")
             messagebox.showerror("Sin ruta", f"No se encontró una ruta entre esas paradas.\n{e}")
 
     def abrir_ventana_historial(self):
         def set_destino(destino):
             self.destino_combo.set(destino)
-            self.ocultar_lupa()
         self.historial.mostrar_ventana_historial(self.root, set_destino)
 
     def toggle_panel_lateral(self):
@@ -341,15 +393,46 @@ class App:
             self.panel_abierto = True
 
     def cerrar_panel_si_fuera(self, event):
-        # Solo cerrar si el panel está abierto y el clic fue fuera del panel lateral
+        # Solo cerrar si el panel está abierto y el clic fue fuera del panel lateral y fuera del botón de opciones
         if self.panel_abierto:
             x, y = event.x_root, event.y_root
             panel_x1 = self.panel_lateral.winfo_rootx()
             panel_y1 = self.panel_lateral.winfo_rooty()
             panel_x2 = panel_x1 + self.panel_lateral.winfo_width()
             panel_y2 = panel_y1 + self.panel_lateral.winfo_height()
-            if not (panel_x1 <= x <= panel_x2 and panel_y1 <= y <= panel_y2):
+            # Coordenadas del botón de opciones
+            btn_x1 = self.boton_opciones.winfo_rootx()
+            btn_y1 = self.boton_opciones.winfo_rooty()
+            btn_x2 = btn_x1 + self.boton_opciones.winfo_width()
+            btn_y2 = btn_y1 + self.boton_opciones.winfo_height()
+            # Si el clic fue fuera del panel y fuera del botón de opciones, cerrar
+            if not (panel_x1 <= x <= panel_x2 and panel_y1 <= y <= panel_y2) and not (btn_x1 <= x <= btn_x2 and btn_y1 <= y <= btn_y2):
                 self.toggle_panel_lateral()
+
+    def toggle_marcadores(self):
+        if self.marcadores_visibles:
+            for marker in self.marcadores:
+                marker.delete()
+            self.marcadores.clear()
+            # Eliminar la línea de ruta si existe
+            if hasattr(self, 'ruta_linea') and self.ruta_linea:
+                self.ruta_linea.delete()
+                self.ruta_linea = None
+            self.marcadores_visibles = False
+            self.boton_marcadores.config(text="📌")
+        else:
+            # Volver a crear los marcadores
+            try:
+                df = pd.read_excel(r"c:\\Users\\landm\\OneDrive\\Escritorio\\DesarrolloProyecto\\GraficoRutasManagua\\src\\excel\\Rutas.xlsx")
+                self.marcadores.clear()
+                for _, row in df.iterrows():
+                    if not pd.isna(row.get("Latitud")) and not pd.isna(row.get("Longitud")):
+                        marker = self.map_widget.set_marker(row["Latitud"], row["Longitud"], text=str(row["Parada"]))
+                        self.marcadores.append(marker)
+            except Exception as e:
+                print(f"Error al volver a mostrar marcadores: {e}")
+            self.marcadores_visibles = True
+            self.boton_marcadores.config(text="📌")
 
     def seleccionar_destino_historial(self, event):
         seleccion = self.historial_listbox.curselection()
@@ -357,7 +440,6 @@ class App:
             idx = len(self.historial.obtener_historial()) - 1 - seleccion[0]
             destino = self.historial.obtener_historial()[idx]
             self.destino_combo.set(destino)
-            self.ocultar_lupa()
 
     def actualizar_historial(self):
         self.historial_listbox.delete(0, tk.END)
@@ -368,4 +450,3 @@ if __name__ == "__main__":
     root = tk.Tk()
     app = App(root)
     root.mainloop()
-
