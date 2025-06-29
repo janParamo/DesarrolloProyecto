@@ -43,7 +43,7 @@ HISTORIAL_PATH = os.path.join(os.path.dirname(__file__), "historial_destinos.xls
 class App:
     def __init__(self, root):
         self.root = root
-        self.root.title("Rutas de Managua")
+        self.root.title("Urbimap")
         self.root.geometry("450x850")
         self.root.configure(bg="#e0f7fa")
         self.root.minsize(350, 600)
@@ -80,14 +80,13 @@ class App:
         self.map_widget.set_position(12.1364, -86.2514)  # Managua, Nicaragua
         self.map_widget.set_zoom(11)
 
-        # --- Botón circular con imagen para desplegar panel lateral (encima del mapa) ---
         img_path = r"c:\Users\landm\OneDrive\Escritorio\DesarrolloProyecto\GraficoRutasManagua\src\Imagenes\Opciones.png"
         if not os.path.exists(img_path):
             print("¡La imagen no existe en la ruta especificada!")
 
         self.opciones_img = Image.open(img_path).resize((50, 50))
         self.opciones_img_tk = ImageTk.PhotoImage(self.opciones_img)
-        # Cambiar el botón de opciones para usar <ButtonRelease-1> en vez de 'command'
+
         self.boton_opciones = tk.Button(
             self.mapa_frame,
             image=self.opciones_img_tk,
@@ -101,10 +100,8 @@ class App:
 
         # --- Variables para control de marcadores ---
         self.marcadores = []
-        self.marcadores_visibles = False  # Ahora ocultos por defecto
+        self.marcadores_visibles = False 
 
-        # --- Botón para mostrar/ocultar marcadores ---
-        # --- Frame para el borde negro del botón de marcadores ---
         self.frame_borde_marcador = tk.Frame(self.mapa_frame, bg="black", width=50, height=50)
         self.frame_borde_marcador.place(relx=1.0, rely=1.0, x=-8, y=-8, anchor="se")
         self.frame_borde_marcador.pack_propagate(False)
@@ -121,8 +118,6 @@ class App:
             command=self.toggle_marcadores
         )
         self.boton_marcadores.pack(fill="both", expand=True, padx=2, pady=2)
-
-        # Los marcadores NO se crean al inicio, solo con el botón
 
         # --- Opciones dentro del frame 2 ---
         self.label_origen = tk.Label(self.opciones_frame, text="Seleccione la parada de origen:", bg="#181616", fg="white", font=("Arial", 14))
@@ -161,8 +156,19 @@ class App:
         self.botones_panel = tk.Frame(self.panel_lateral, bg="#232326")
         self.botones_panel.place(relx=0.5, rely=0.5, anchor="center")
 
+        # Logo en la esquina superior izquierda del panel lateral
+        logo_path = r"c:\Users\landm\OneDrive\Escritorio\DesarrolloProyecto\GraficoRutasManagua\src\Imagenes\logo.png"
+        if os.path.exists(logo_path):
+            self.logo_img = Image.open(logo_path).resize((48, 48))
+            self.logo_img_tk = ImageTk.PhotoImage(self.logo_img)
+            self.label_logo = tk.Label(self.panel_lateral, image=self.logo_img_tk, bg="#232326", bd=0)
+            self.label_logo.place(relx=0.01, rely=0.01, anchor="nw")
+        else:
+            self.label_logo = None
+
+        # Label 'Extras' arriba a la derecha del panel lateral
         self.label_extras = tk.Label(self.panel_lateral, text="Extras", bg="#232326", fg="#ffffff", font=("Arial", 12, "bold"))
-        self.label_extras.place(relx=0.02, rely=0.01, anchor="nw")
+        self.label_extras.place(relx=0.98, rely=0.01, anchor="ne")
 
         panel_height = 850
         sep_y = int(panel_height * 0.75)
